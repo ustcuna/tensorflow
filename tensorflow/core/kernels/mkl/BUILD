@@ -506,3 +506,22 @@ tf_cc_test_mkl(
         "//tensorflow/core/kernels/mkl:mkl_matmul_op",
     ] + MKL_TEST_DEPS,
 )
+
+tf_mkl_kernel_library(
+    name = "mkl_dice_op",
+    srcs = ["mkl_dice_op.cc"],
+    hdrs = ["compile_util.h"],
+    deps = MKL_DEPS,
+)
+
+tf_cc_test_mkl(
+    name = "mkl_dice_op_test",
+    size = "small",
+    srcs = ["mkl_dice_op_test.cc"],
+    linkstatic = 1,
+    deps = [
+        ":mkl_dice_op",
+        "//tensorflow/cc:math_ops",
+        "//tensorflow/core/kernels:cwise_op",
+    ] + MKL_TEST_DEPS,
+)

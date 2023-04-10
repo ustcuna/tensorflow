@@ -54,6 +54,63 @@ inline bool ExecuteSingleThreadedGemm(int m, int n, int k, int bytes) {
   return mul_size < l2_heur;
 }
 
+inline int EstimateThreadsToUse(int m, int n, int k, int load_bytes, int max_threads) {
+  // We do this calculation to estimate the cost of a dense kernel.
+  // This func returns the proper number of threads in [1:max_threads] to use 
+  // with the given m/n/k sizes and cost per coefficient.
+
+  // Cost of memory fetches from L2 cache.
+  // 64 is typical cache line size.
+  // We are most interested in single-threaded computational time
+  // around 100us-10ms (smaller time is too small for parallelization,
+  // larger time is not interesting
+  // either because we are probably using all available threads already).
+  // And for the target time range, L2 seems to be what matters. Data set
+  // fitting into L1 is too small to take noticeable time. Data set fitting
+  // only into L3 presumably will take more than 10ms to load and process.
+
+  // 11 is L2 cache latency for Haswell.
+  // 14 is L2 cache latency for SKL/CLX/ICX.
+  // 16 is L2 cache latency for SPR.
+  bool is_spr = port::TestCPUFeature(port::CPUFeature::AMX_TILE) ||
+                port::TestCPUFeature(port::CPUFeature::AMX_INT8) ||
+                port::TestCPUFeature(port::CPUFeature::AMX_BF16);
+  int l2_cache_latency = is_spr ? 16 : 14;
+  const double kL2LoadCycles = 1.0 / 64 * l2_cache_latency;
+  const double kStoreCycles = 1.0 / 64 * l2_cache_latency;
+  // Scaling from Eigen compute cost to device cycles.
+  static const int kDeviceCyclesPerComputeCycle = 1;
+  // Costs in device cycles.
+  static const int kStartupCycles = 100000;
+  static const int kPerThreadCycles = 100000;
+  // performance per core per cycle for AVX512_FMA FP32 is 64.
+  // 1 AVX512 FMA can do 16x madd in 1 cpu cycle on SKL/CLX/ICX/SPR,
+  // 2 FMAs should handle 16x2x2=64 FP32 elements per cycle.
+  bool is_input_fp32 = (load_bytes == 4);
+  bool is_input_bf16 = (load_bytes == 2);
+  bool is_input_int8 = (load_bytes == 1);
+  double compute_cycles;
+  if (is_input_fp32) {
+    compute_cycles = 1.0 * 1 / 64;
+  } else if (is_input_bf16) {
+    compute_cycles = 1.0 * 1 / 128;
+  } else if (is_input_int8){
+    compute_cycles = 1.0 * 1 / 256;
+  } else {
+    // To handle INT16 or FP16
+    compute_cycles = 1.0 * 1 / 128;
+  }
+  int64 l2_load_elements = m * k + k * n;
+  int64 store_elements = m * n;
+  int64 compute_elements = (int64) 2 * m * k * n;
+  double totalCost = l2_load_elements * kL2LoadCycles * load_bytes +
+                    store_elements * kStoreCycles * load_bytes +
+                    compute_elements * kDeviceCyclesPerComputeCycle * compute_cycles;
+  int64 threads = (totalCost - kStartupCycles) / kPerThreadCycles + 0.9;
+  //std::cout << " Esitimated threads num is " << std::fmin(max_threads, std::fmax(1, threads)) << " for shape M:"<< m << ", N:" << n << ", K:"<< k << std::endl;
+  return std::fmin(max_threads, std::fmax(1, threads));
+}
+
 // This structure aggregates multiple inputs to MklDnnMatMul* methods.
 struct MklDnnMatMulFwdParams {
   memory::dims src_dims;
@@ -219,9 +276,14 @@ class MklDnnMatMulFwdPrimitive : public MklPrimitive {
                                            MklDnnType<Toutput>(),
                                            matmul_fwd_params.dst_format));
 
-    context_.bias_md.reset(new memory::desc({matmul_fwd_params.bias_dims},
+    if (matmul_fwd_params.bias_dims[0] == 0) {
+          context_.bias_md.reset(new memory::desc());
+    } else {
+          context_.bias_md.reset(new memory::desc({matmul_fwd_params.bias_dims},
                                             MklDnnType<Tbias>(),
                                             memory::format_tag::any));
+    }
+    
     // Create an inner-product.
     context_.fwd_desc.reset(new inner_product_forward::desc(
         matmul_fwd_params.const_weight ? prop_kind::forward_inference

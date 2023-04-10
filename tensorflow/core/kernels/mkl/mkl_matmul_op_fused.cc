@@ -45,15 +45,21 @@ class MklFusedMatMulOp : public MklDnnMatMulOpBase<T, T> {
     OP_REQUIRES(ctx, fused_ops_.size() <= 2,
                 errors::InvalidArgument(
                     "MklFusedMatMul must have 2 post-arguments at most."));
-    OP_REQUIRES(
+    if (fused_ops_[0] == "BiasAdd") {
+       has_bias_ = true;
+    }
+    /*OP_REQUIRES(
         ctx, fused_ops_[0] == "BiasAdd",
         errors::InvalidArgument(
             "The 1st post-argument of MklFusedMatMul must be BiasAdd."));
+    */
     if (fused_ops_.size() > 1 && fused_ops_[1] == "Add") fuse_add_ = true;
     OP_REQUIRES(
         ctx, transpose_a_ == false,
         errors::InvalidArgument("In[0] of MklMatMul can't be transposed."));
     if (fused_ops_.size() == 2 && fused_ops_[1] == "LeakyRelu") {
+      OP_REQUIRES_OK(ctx, ctx->GetAttr("leakyrelu_alpha", &leakyrelu_alpha));
+    } else if (fused_ops_.size() == 1 && fused_ops_[0] ==  "LeakyRelu") {
       OP_REQUIRES_OK(ctx, ctx->GetAttr("leakyrelu_alpha", &leakyrelu_alpha));
     }
   }
@@ -62,7 +68,7 @@ class MklFusedMatMulOp : public MklDnnMatMulOpBase<T, T> {
     // FusedMatMul has 3 inputs: src, weights, bias
     const Tensor& src_tensor = ctx->input(this->kInputIndexSrc);
     const Tensor& weight_tensor = ctx->input(this->kInputIndexWeight);
-    const Tensor& bias_tensor = MklGetInput(ctx, this->kInputIndexBias);
+    const Tensor& bias_tensor = has_bias_ ? ctx->input(this->kInputIndexBias): Tensor();
 
     MklDnnShape src_mkl_shape;
     MklDnnShape weight_mkl_shape;
@@ -81,8 +87,10 @@ class MklFusedMatMulOp : public MklDnnMatMulOpBase<T, T> {
                 errors::InvalidArgument("In[0] is not a matrix"));
     OP_REQUIRES(ctx, TensorShapeUtils::IsMatrix(weight_tf_shape),
                 errors::InvalidArgument("In[1] is not a matrix"));
-    OP_REQUIRES(ctx, TensorShapeUtils::IsVector(bias_tensor.shape()),
-                errors::InvalidArgument("Biases must be 1D"));
+    if (has_bias_) {
+      OP_REQUIRES(ctx, TensorShapeUtils::IsVector(bias_tensor.shape()),
+                  errors::InvalidArgument("Biases must be 1D"));
+    }
 
     // Expression: [batch, k] * [k, channel] + [channel] = [batch, channel]
     //
@@ -99,10 +107,12 @@ class MklFusedMatMulOp : public MklDnnMatMulOpBase<T, T> {
         errors::InvalidArgument(
             "Matrix size-incompatible: In[0]: ", src_tf_shape.DebugString(),
             ", In[1]: ", weight_tf_shape.DebugString()));
-    OP_REQUIRES(ctx, bias_tensor.shape().dim_size(0) == channel,
-                errors::InvalidArgument(
-                    "Must provide as many biases as the channel size: ",
-                    bias_tensor.shape().DebugString(), " vs. ", channel));
+    if (has_bias_) {
+      OP_REQUIRES(ctx, bias_tensor.shape().dim_size(0) == channel,
+                  errors::InvalidArgument(
+                      "Must provide as many biases as the channel size: ",
+                      bias_tensor.shape().DebugString(), " vs. ", channel));
+    }
 
     // For inputs s[batch, k], w[k, channel] and b[channel], the primitive
     // dims should be described like this:
@@ -111,7 +121,11 @@ class MklFusedMatMulOp : public MklDnnMatMulOpBase<T, T> {
     memory::dims src_dims = memory::dims({batch, k});
     // Reverse the weights dims from [k, channel] to [channel, k].
     memory::dims weight_dims = memory::dims({channel, k});
-    memory::dims bias_dims = memory::dims({channel});
+    //memory::dims bias_dims = memory::dims({channel});
+    memory::dims bias_dims = memory::dims({0});
+    if (has_bias_) {
+        bias_dims = memory::dims({channel});
+    }
     memory::dims dst_dims = memory::dims({batch, channel});
     memory::format_tag src_format = memory::format_tag::nc;
     memory::format_tag weight_format =
@@ -208,7 +222,11 @@ class MklFusedMatMulOp : public MklDnnMatMulOpBase<T, T> {
       // Prepare the input and output for primitive.
       T* src_data = const_cast<T*>(src_tensor.flat<T>().data());
       T* weight_data = const_cast<T*>(weight_tensor.flat<T>().data());
-      T* bias_data = const_cast<T*>(bias_tensor.flat<T>().data());
+      //T* bias_data = const_cast<T*>(bias_tensor.flat<T>().data());
+      T* bias_data = nullptr;
+      if (has_bias_) {
+          bias_data = const_cast<T*>(bias_tensor.flat<T>().data());
+      }
       T* dst_data = const_cast<T*>(dst_tensor->flat<T>().data());
 
       // Reorder input if necessary.
@@ -255,8 +273,31 @@ class MklFusedMatMulOp : public MklDnnMatMulOpBase<T, T> {
         }
       }
       std::shared_ptr<stream> cpu_stream;
-      auto st = ExecuteSingleThreadedGemm(batch, channel, k, sizeof(T));
-      MklDnnThreadPool eigen_tp(ctx, st ? 1 : -1);
+    
+      // To handle the initial strategy which use either all avaliable threads (too many)
+      // or just execute single threaded (too few).
+      // OneDNN cost model optimization estimates a proper number of threads to use
+      // Thus will benefit
+      // 1. Those cases with larger shapes for single threaded execution.
+      // 2. Those cases with smaller shapes for using all available threads.
+      
+      //auto st = ExecuteSingleThreadedGemm(batch, channel, k, sizeof(T));
+      //MklDnnThreadPool eigen_tp(ctx, st ? 1 : -1);
+      MklDnnThreadPool eigen_tp;
+
+      const char* env_p = std::getenv("TF_ENABLE_COST_MODEL");
+      if (env_p != NULL && env_p[0] == '1') {
+        int current_thr_num = ctx->device()
+                            ->tensorflow_cpu_worker_threads()
+                            ->workers->AsEigenThreadPool()->NumThreads();
+        int estimate_thr_num = EstimateThreadsToUse(batch, channel, k, sizeof(T), current_thr_num);
+        eigen_tp = MklDnnThreadPool(ctx, estimate_thr_num);
+      } else {
+        auto st = ExecuteSingleThreadedGemm(batch, channel, k, sizeof(T));
+        eigen_tp = MklDnnThreadPool(ctx, st ? 1 : -1);
+        //int num_threads_used = (st ? 1 : 56);
+        //std::cout << " # Threads used: " << num_threads_used << " for shape M:"<< batch << ", N:" << channel << ", K:"<< k << std::endl;
+      }
       cpu_stream.reset(CreateStream(&eigen_tp, matmul_prim->GetEngine()));
 
       UserScratchPad<unsigned char> scratch_pad;
@@ -276,8 +317,8 @@ class MklFusedMatMulOp : public MklDnnMatMulOpBase<T, T> {
 
   void ExtendMklDnnMatMulFwdParams(OpKernelContext* ctx,
                                    MklDnnMatMulFwdParams& params) {
-    if (fused_ops_.size() == 2) {
-      string post_op = fused_ops_[1];
+    if (fused_ops_.size() == 2 || (!has_bias_ && fused_ops_.size() == 1)) {
+      string post_op = has_bias_ ? fused_ops_[1] : fused_ops_[0];
 
       if (post_op == "Relu") {
         params.post_op_params.push_back({"relu", {1.0, 0.0, 0.0}});
@@ -307,6 +348,7 @@ class MklFusedMatMulOp : public MklDnnMatMulOpBase<T, T> {
   }
 
  private:
+  bool has_bias_ = false;
   bool fuse_add_ = false;
   bool transpose_a_;
   bool transpose_b_;

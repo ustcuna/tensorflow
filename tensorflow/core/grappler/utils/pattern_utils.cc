@@ -44,11 +44,26 @@ bool SubGraphMatcher<MatchingDirection::kFollowInputs>::DoesOpTypePatternMatch(
     const OpTypePattern& pattern, MutableNodeView* node_view,
     NodeViewMatch* match) {
   // Currently no control inputs and outputs are allowed.
-  if (node_view->NumControllingFanins() > 0 ||
-      node_view->NumControlledFanouts() > 0)
+  //if (node_view->NumControllingFanins() > 0 ||
+  //    node_view->NumControlledFanouts() > 0){
+  if (node_view->NumControllingFanins() > 0)
     return false;
+  if (node_view->NumControlledFanouts() > 0){
+    for (const auto& controlled_fanout : node_view->GetControlledFanouts()) {
+      MutableNodeView* fanout_view = controlled_fanout.node_view();
+      //std::cout << "controlled_fanout op is " << fanout_view->node()->op() << std::endl;
+      //std::cout << "controlled_fanout name is " << fanout_view->GetName() << std::endl;
+      if (fanout_view->node()->op() == "Identity"){
+        continue;
+      } else {
+        return false;
+      }
+    }
+  }
 
   bool op_type_matched = false;
+  //std::cout << "We want an op as " << pattern.op << std::endl;
+  //std::cout << "We got an op as " << node_view->node()->op() << std::endl;
   if (pattern.op == "*") {
     op_type_matched = true;
   } else {
@@ -135,6 +150,7 @@ bool SubGraphMatcher<MatchingDirection::kFollowInputs>::DoesOpTypePatternMatch(
             pattern.children[pattern_child_indices[i]];
         match->children.push_back(NodeViewMatch());
         NodeViewMatch* child_match = &(match->children.back());
+        //std::cout << "  Child " << i << " is " << child_node_view->node()->op() << std::endl;
         if (!DoesOpTypePatternMatch(child_pattern, child_node_view,
                                     child_match)) {
           return false;

@@ -7953,3 +7953,26 @@ tf_kernel_library(
         "//tensorflow/core:lib",
     ],
 )
+
+tf_kernel_library(
+    name = "weight_norm_op",
+    srcs = ["weight_norm_cpu.cc"],
+    #copts = ["-g"],
+    deps = [
+        "//tensorflow/core:tensorflow",
+    ],
+)
+
+tf_cc_test(
+    name = "weight_norm_op_test",
+    srcs = ["weight_norm_cpu_test.cc"],
+    deps = [
+        ":weight_norm_op",
+        "//tensorflow/cc:cc_ops",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "//tensorflow/core:testlib",
+    ],
+)

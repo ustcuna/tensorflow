@@ -1828,6 +1828,16 @@ REGISTER_OP("_MklLayerNorm")
     .Attr("epsilon: float = 0.001")
     .SetShapeFn(shape_inference::UnchangedShape);
 
+// Dice fusion op for inference
+REGISTER_OP("_MklDice")
+    .Input("in: T")
+    .Input("rvar: T")
+    .Input("mean_rvar: T")
+    .Input("alpha: T")
+    .Output("out: T")
+    .Attr("T: {float}")
+    .SetShapeFn(shape_inference::UnchangedShape);
+
 }  // namespace tensorflow
 
 #endif  // INTEL_MKL
