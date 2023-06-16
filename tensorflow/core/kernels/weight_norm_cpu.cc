@@ -24,16 +24,27 @@ public:
 
     void Compute(OpKernelContext* ctx) override {        
         // Get weight tensors
-        const Tensor& weight_tensor = ctx->input(0);
-        TensorShape shape = weight_tensor.shape();
-        int64_t input_dims = weight_tensor.dims();
+        const Tensor& init_weight_tensor = ctx->input(0);
+        TensorShape shape = init_weight_tensor.shape();
+        int64_t input_dims = init_weight_tensor.dims();
         OP_REQUIRES(ctx, (input_dims == 2),
-                    errors::InvalidArgument("Weights is not 2D, currently we only support 2D"));
-        int64_t row = weight_tensor.dim_size(0);
-        int64_t col = weight_tensor.dim_size(1);
+                    errors::InvalidArgument("Init weights is not 2D, currently we only support 2D."));
+        int64_t row = init_weight_tensor.dim_size(0);
+        int64_t col = init_weight_tensor.dim_size(1);
+
+        const Tensor& trainable_weight_tensor = ctx->input(1);
+        TensorShape trainable_shape = trainable_weight_tensor.shape();
+        int64_t trainable_input_dims = trainable_weight_tensor.dims();
+        OP_REQUIRES(ctx, (trainable_input_dims == 2),
+                    errors::InvalidArgument("Trainable weights is not 2D, currently we only support 2D."));
+        int64_t trainable_row = trainable_weight_tensor.dim_size(0);
+        int64_t trainable_col = trainable_weight_tensor.dim_size(1);
+        OP_REQUIRES(ctx, (trainable_row == row && trainable_col == col),
+                    errors::InvalidArgument("Trainable weights should have same shape with init weights. Pls check use case."));
 
         // Get weight_norm dim, for a 2D tensor, norm_dim should be either 0/1/2
-        const Tensor& norm_dim_tensor = ctx->input(1);
+        // 0-row / 1-col / 2-tuple(0,1)
+        const Tensor& norm_dim_tensor = ctx->input(2);
         // Dim should be a scalar integer
         OP_REQUIRES(ctx,
                 (TensorShapeUtils::IsScalar(norm_dim_tensor.shape()) ||
@@ -51,7 +62,8 @@ public:
                         "[0, ", input_dims, "], but got ", axis));
 
         // Handle input tensors
-        auto src_data = weight_tensor.flat<T>();
+        auto src_data = init_weight_tensor.flat<T>();
+        auto trainable_src_data = trainable_weight_tensor.flat<T>();
         
         // Allocate for output tensor
         Tensor *output_tensor = NULL;
@@ -62,7 +74,10 @@ public:
             ctx->device()->tensorflow_cpu_worker_threads()->num_threads;
 
         // Small constant to avoid division by zero
-        float eps = 1e-12;
+        const Tensor& l2norm_epsilon = ctx->input(3);
+        auto epsilon_flat = l2norm_epsilon.flat<T>();
+        T eps = epsilon_flat(0);
+
         const int64_t cost_per_row = col * sizeof(T);
         const int64_t cost_per_col = row * sizeof(T);
         // Case1. norm is calculated over the entire array
@@ -78,10 +93,11 @@ public:
             };
             Shard(num_threads, ctx->device()->tensorflow_cpu_worker_threads()->workers, row, cost_per_row, shard_fn);
             scaling_factor = sqrt(tmp_sum) + eps;
+            auto inverse_scale = 1 / scaling_factor;
             auto shard_fn2 = [&](int64 start, int64 limit) {
                 for (int64 i = start; i < limit; i++) {
                     for (int j = 0; j < col; j++) {
-                        output(i * col + j) = src_data(i * col + j) / scaling_factor;
+                        output(i * col + j) = src_data(i * col + j) * inverse_scale * trainable_src_data(i * col + j);
                     }
                 }
             };
@@ -89,6 +105,7 @@ public:
         } else if (axis == 0){
             // Case2. norm is calculated along axis 0 (per row)
             std::vector<T> scaling_factors(col);
+            std::vector<T> inverse_scale(col);
             auto shard_fn = [&](int64 start, int64 limit) {
                 for (int i = start; i < limit; i++) {
                     auto tmp_sum = 0.0;
@@ -96,6 +113,7 @@ public:
                         tmp_sum += pow(src_data(j * col + i), 2);
                     }
                     scaling_factors[i] = sqrt(tmp_sum) + eps;
+                    inverse_scale[i] = 1 / scaling_factors[i];
                 }
             };
             Shard(num_threads, ctx->device()->tensorflow_cpu_worker_threads()->workers, col, cost_per_col, shard_fn);
@@ -104,7 +122,7 @@ public:
             auto shard_fn2 = [&](int64 start, int64 limit) {
                 for (int64 i = start; i < limit; i++) {
                     for (int j = 0; j < col; j++){
-                        output(i * col + j) = src_data(i * col + j) / scaling_factors[j];
+                        output(i * col + j) = src_data(i * col + j) * inverse_scale[j] * trainable_src_data(i * col + j);
                     }
                 }
             };
@@ -112,6 +130,7 @@ public:
         } else {
             // Case3. norm is calculated along axis 1 (per col)
             std::vector<T> scaling_factors(row);
+            std::vector<T> inverse_scale(row);
             auto shard_fn = [&](int64 start, int64 limit) {
                 for (int i = start; i < limit; i++) {
                     auto tmp_sum = 0.0;
@@ -119,8 +138,9 @@ public:
                         tmp_sum += pow(src_data(i * col + j), 2);
                     }
                     scaling_factors[i] = sqrt(tmp_sum) + eps;
+                    inverse_scale[i] = 1 / scaling_factors[i];
                     for (int j = 0; j < col; j++){
-                        output(i * col + j) = src_data(i * col + j) / scaling_factors[i];
+                        output(i * col + j) = src_data(i * col + j) * inverse_scale[i] * trainable_src_data(i * col + j);
                     }
                 }
             };
@@ -137,11 +157,14 @@ private:
 };
 
 REGISTER_OP("WeightNorm")
-    .Input("weights: T")
-    .Input("norm_dim: int64")
+    .Input("init_weights: T")
+    .Input("trainable_weights: T")
+    .Input("l2norm_axis: int64")
+    .Input("l2norm_epsilon: T")
     .Output("output: T")
-    .Attr("T: {double, float}")
+    .Attr("T: {float, double}")
     .SetShapeFn(shape_inference::UnchangedShape);
+
 
 // Register the WeightNormOp kernel
 REGISTER_KERNEL_BUILDER(Name("WeightNorm")
