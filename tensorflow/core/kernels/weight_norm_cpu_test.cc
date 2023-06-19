@@ -1,4 +1,7 @@
 #include "tensorflow/cc/ops/const_op.h"
+#include "tensorflow/cc/ops/math_ops.h"
+#include "tensorflow/cc/ops/nn_ops.h"
+#include "tensorflow/cc/ops/standard_ops.h"
 #include "tensorflow/core/common_runtime/kernel_benchmark_testlib.h"
 #include "tensorflow/core/framework/fake_input.h"
 #include "tensorflow/core/framework/node_def_builder.h"
@@ -9,6 +12,7 @@
 #include "tensorflow/core/kernels/ops_util.h"
 #include "tensorflow/core/platform/test.h"
 #include "tensorflow/core/platform/test_benchmark.h"
+#include "tensorflow/core/public/session.h"
 
 namespace tensorflow {
 namespace {
@@ -161,7 +165,7 @@ TEST_F(WeightNormTest, Norm_Test_Dim1) {
 //                       Performance benchmarks                               //
 //----------------------------------------------------------------------------//
 template <typename T>
-static Graph* WeightNormGraph(const int64& dim, const TensorShape& shape) {
+static Graph* WeightNormGraph(const string& kind, const int64& dim, const TensorShape& shape) {
   auto* graph = new Graph(OpRegistry::Global());
 
   DataType data_type = DataTypeToEnum<T>::v();
@@ -176,43 +180,113 @@ static Graph* WeightNormGraph(const int64& dim, const TensorShape& shape) {
   
   Tensor l2norm_axis(DT_INT64, TensorShape({}));
   l2norm_axis.scalar<int64>()() = dim;
+  Node* axis = test::graph::Constant(graph, l2norm_axis);
 
   Tensor l2norm_epsilon(data_type, TensorShape({}));
   l2norm_epsilon.scalar<T>()() = 1e-6;
-  
-  Node* weightnorm;
-  // weight_norm op.
-  TF_CHECK_OK(NodeBuilder(graph->NewName("weight_norm"), "WeightNorm")
-                  .Input(input)
-                  .Input(trainable_input)
-                  .Input(test::graph::Constant(graph, l2norm_axis))
-                  .Input(test::graph::Constant(graph, l2norm_epsilon))
-                  .Attr("T", data_type)
-                  .Finalize(graph, &weightnorm));
+  Node* eps = test::graph::Constant(graph, l2norm_epsilon);
 
-  return graph;
+  const bool isDefault = (kind == "Default");
+
+  // Refer to nn_impl.py, l2_norm for non-complex is calculated using
+  // square_sum = math_ops.reduce_sum(math_ops.square(x), axis, keepdims=True)
+  // x_inv_norm = math_ops.rsqrt(math_ops.maximum(square_sum, epsilon))
+  // return math_ops.multiply(x, x_inv_norm, name=name)
+  Node* square;
+  Node* reduce_sum;
+  Node* max;
+  Node* rsqrt;
+  Node* mul_0;
+  Node* mul_1;
+
+  Node* weightnorm;
+
+  if (isDefault) {
+    TF_CHECK_OK(NodeBuilder(graph->NewName("square"), "Square")
+                    .Input(input)
+                    .Attr("T", data_type)
+                    .Finalize(graph, &square));
+
+    // To handle dim=2, which should be [0, 1] for reduce_sum axis
+    if(dim == 2){
+      std::vector<int> all_reduce_dims = {0, 1};
+      Tensor all_dim_axis_t(DT_INT64, TensorShape({(int64) all_reduce_dims.size()}));
+      auto tensor_data = all_dim_axis_t.flat<int64>().data();
+      std::copy(all_reduce_dims.begin(), all_reduce_dims.end(), tensor_data);
+      Node* all_dim_axis = test::graph::Constant(graph, all_dim_axis_t);
+      TF_CHECK_OK(NodeBuilder(graph->NewName("reduce_sum"), "Sum")
+                    .Input(square)
+                    .Input(all_dim_axis)
+                    .Attr("T", data_type)
+                    .Attr("keep_dims", true)
+                    .Finalize(graph, &reduce_sum));
+    } else {
+      TF_CHECK_OK(NodeBuilder(graph->NewName("reduce_sum"), "Sum")
+                    .Input(square)
+                    .Input(axis)
+                    .Attr("T", data_type)
+                    .Attr("keep_dims", true)
+                    .Finalize(graph, &reduce_sum));
+    }
+
+    TF_CHECK_OK(NodeBuilder(graph->NewName("max"), "Maximum")
+                    .Input(reduce_sum)
+                    .Input(eps)
+                    .Attr("T", data_type)
+                    .Finalize(graph, &max));
+
+    TF_CHECK_OK(NodeBuilder(graph->NewName("rsqrt"), "Rsqrt")
+                    .Input(max)
+                    .Attr("T", data_type)
+                    .Finalize(graph, &rsqrt));
+
+    TF_CHECK_OK(NodeBuilder(graph->NewName("mul_0"), "Mul")
+                    .Input(input)
+                    .Input(rsqrt)
+                    .Attr("T", data_type)
+                    .Finalize(graph, &mul_0));
+
+    TF_CHECK_OK(NodeBuilder(graph->NewName("mul_1"), "Mul")
+                    .Input(mul_0)
+                    .Input(trainable_input)
+                    .Attr("T", data_type)
+                    .Finalize(graph, &mul_1));
+
+    return graph;
+  } else {
+    // weight_norm op.
+    TF_CHECK_OK(NodeBuilder(graph->NewName("weight_norm"), "WeightNorm")
+                    .Input(input)
+                    .Input(trainable_input)
+                    .Input(axis)
+                    .Input(eps)
+                    .Attr("T", data_type)
+                    .Finalize(graph, &weightnorm));
+
+    return graph;
+  }
 }
 
-#define BM_WEIGHTNORM(A, B, type, dim, T)                               \
-  static void BM_WEIGHTNORM_##A##_##B##_##type##_##dim##_##T(           \
+#define BM_WEIGHTNORM(kind, A, B, type, dim, T)                         \
+  static void BM_WEIGHTNORM_##kind##_##A##_##B##_##type##_##dim##_##T(  \
       ::testing::benchmark::State& state) {                             \
     int64 num_computed_elements = (A) * (B);                            \
     int64 flops_per_iter = num_computed_elements;                       \
-    test::Benchmark(#type, WeightNormGraph<T>(dim, {A, B}))             \
+    test::Benchmark(#type, WeightNormGraph<T>(#kind, dim, {A, B}))      \
         .Run(state);                                                    \
     state.SetItemsProcessed(state.iterations() * flops_per_iter);       \
   }                                                                     \
-  BENCHMARK(BM_WEIGHTNORM_##A##_##B##_##type##_##dim##_##T)->UseRealTime();
+  BENCHMARK(BM_WEIGHTNORM_##kind##_##A##_##B##_##type##_##dim##_##T)->UseRealTime();
 
 #define BENCHMARK_WEIGHTNORM(A, B, type, T)    \
-  BM_WEIGHTNORM(A, B, type, 2, T);             \
-  BM_WEIGHTNORM(A, B, type, 0, T);             \
-  BM_WEIGHTNORM(A, B, type, 1, T);
+  BM_WEIGHTNORM(Default, A, B, type, 2, T);    \
+  BM_WEIGHTNORM(Fused, A, B, type, 2, T);      \
+  /*BM_WEIGHTNORM(Default, A, B, type, 1, T);    \
+  BM_WEIGHTNORM(Fused, A, B, type, 1, T);      \
+  BM_WEIGHTNORM(Default, A, B, type, 2, T);    \
+  BM_WEIGHTNORM(Fused, A, B, type, 2, T);*/
 
 #define BENCHMARK_DTYPE(T)                     \
-  BENCHMARK_WEIGHTNORM(32, 64, cpu, T);        \
-  BENCHMARK_WEIGHTNORM(64, 128, cpu, T);       \
-  BENCHMARK_WEIGHTNORM(128, 256, cpu, T);      \
   BENCHMARK_WEIGHTNORM(512, 256, cpu, T);      \
   BENCHMARK_WEIGHTNORM(1024, 512, cpu, T);     \
   BENCHMARK_WEIGHTNORM(1024, 2048, cpu, T);    \

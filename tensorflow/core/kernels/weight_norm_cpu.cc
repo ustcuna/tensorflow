@@ -97,22 +97,25 @@ public:
             auto shard_fn2 = [&](int64 start, int64 limit) {
                 for (int64 i = start; i < limit; i++) {
                     for (int j = 0; j < col; j++) {
-                        output(i * col + j) = src_data(i * col + j) * inverse_scale * trainable_src_data(i * col + j);
+                        output(i * col + j) = src_data(i * col + j) * trainable_src_data(i * col + j) * inverse_scale;
                     }
                 }
             };
             Shard(num_threads, ctx->device()->tensorflow_cpu_worker_threads()->workers, row, cost_per_row, shard_fn2);
         } else if (axis == 0){
             // Case2. norm is calculated along axis 0 (per row)
-            std::vector<T> scaling_factors(col);
-            std::vector<T> inverse_scale(col);
+            std::vector<T> scaling_factors(col, 0.0);
+            std::vector<T> inverse_scale(col, 0.0);
+
+            // row be the outer loop to make src_data continuous
             auto shard_fn = [&](int64 start, int64 limit) {
-                for (int i = start; i < limit; i++) {
-                    auto tmp_sum = 0.0;
-                    for (int j = 0; j < row; j++){
-                        tmp_sum += pow(src_data(j * col + i), 2);
+                for (int j = 0; j < row; j++){
+                    for (int i = start; i < limit; i++) {
+                        scaling_factors[i] += pow(src_data(j * col + i), 2);
                     }
-                    scaling_factors[i] = sqrt(tmp_sum) + eps;
+                }
+                for (int i = start; i < limit; i++) {
+                    scaling_factors[i] = sqrt(scaling_factors[i]) + eps;
                     inverse_scale[i] = 1 / scaling_factors[i];
                 }
             };
