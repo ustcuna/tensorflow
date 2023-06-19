@@ -279,12 +279,12 @@ static Graph* WeightNormGraph(const string& kind, const int64& dim, const Tensor
   BENCHMARK(BM_WEIGHTNORM_##kind##_##A##_##B##_##type##_##dim##_##T)->UseRealTime();
 
 #define BENCHMARK_WEIGHTNORM(A, B, type, T)    \
-  BM_WEIGHTNORM(Default, A, B, type, 2, T);    \
-  BM_WEIGHTNORM(Fused, A, B, type, 2, T);      \
-  /*BM_WEIGHTNORM(Default, A, B, type, 1, T);    \
+  BM_WEIGHTNORM(Default, A, B, type, 0, T);    \
+  BM_WEIGHTNORM(Fused, A, B, type, 0, T);      \
+  BM_WEIGHTNORM(Default, A, B, type, 1, T);    \
   BM_WEIGHTNORM(Fused, A, B, type, 1, T);      \
   BM_WEIGHTNORM(Default, A, B, type, 2, T);    \
-  BM_WEIGHTNORM(Fused, A, B, type, 2, T);*/
+  BM_WEIGHTNORM(Fused, A, B, type, 2, T);
 
 #define BENCHMARK_DTYPE(T)                     \
   BENCHMARK_WEIGHTNORM(512, 256, cpu, T);      \

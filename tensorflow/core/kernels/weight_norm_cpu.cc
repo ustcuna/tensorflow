@@ -1,5 +1,4 @@
 #include <iostream>
-#include <cmath>
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/op_kernel.h"
@@ -87,7 +86,7 @@ public:
             auto shard_fn = [&](int64 start, int64 limit) {
                 for (int64 i = start; i < limit; i++) {
                     for (int j = 0; j < col; j++) {
-                        tmp_sum += pow(src_data(i * col + j), 2);
+                        tmp_sum += src_data(i * col + j) * src_data(i * col + j);
                     }
                 }
             };
@@ -111,7 +110,7 @@ public:
             auto shard_fn = [&](int64 start, int64 limit) {
                 for (int j = 0; j < row; j++){
                     for (int i = start; i < limit; i++) {
-                        scaling_factors[i] += pow(src_data(j * col + i), 2);
+                        scaling_factors[i] += src_data(j * col + i) * src_data(j * col + i);
                     }
                 }
                 for (int i = start; i < limit; i++) {
@@ -138,7 +137,7 @@ public:
                 for (int i = start; i < limit; i++) {
                     auto tmp_sum = 0.0;
                     for (int j = 0; j < col; j++){
-                        tmp_sum += pow(src_data(i * col + j), 2);
+                        tmp_sum += src_data(i * col + j) * src_data(i * col + j);
                     }
                     scaling_factors[i] = sqrt(tmp_sum) + eps;
                     inverse_scale[i] = 1 / scaling_factors[i];
