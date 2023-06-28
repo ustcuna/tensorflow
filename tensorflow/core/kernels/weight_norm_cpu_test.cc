@@ -41,7 +41,7 @@ TEST_F(WeightNormTest, Norm_Test_All_Dim) {
   MakeOpAndSetDevice(Device::CPU, DT_FLOAT);
   // Set up the input tensor.
   AddInputFromArray<float>(TensorShape({3, 5}), {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0});
-  AddInputFromArray<float>(TensorShape({3, 5}), {15.0, 14.0, 13.0, 12.0, 11.0, 10.0, 9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0});
+  AddInputFromArray<float>(TensorShape({5, }), {5.0, 4.0, 3.0, 2.0, 1.0});
   AddInput<int64_t>(TensorShape({}), [](int i) { return 2; });
   AddInput<float>(TensorShape({}), [](float i) { return 1e-6; });
 
@@ -57,16 +57,16 @@ TEST_F(WeightNormTest, Norm_Test_All_Dim) {
     // Set up the expected output tensor.
     Tensor expected_output(allocator(), DT_FLOAT, TensorShape({3, 5}));
     float output_array[15];
-    output_array[0] = 0.42597138;
-    output_array[1] = 0.79514657;
-    output_array[2] = 1.10752558;
-    output_array[3] = 1.3631084;
-    output_array[4] = 1.56189504;
-    output_array[5] = 1.7038855;
-    output_array[6] = 1.78907978;
-    output_array[7] = 1.81747787;
-    output_array[8] = 1.78907978;
-    output_array[9] = 1.7038855;
+    output_array[0] = 0.14199046;
+    output_array[1] = 0.22718473;
+    output_array[2] = 0.25558283;
+    output_array[3] = 0.22718473;
+    output_array[4] = 0.14199046;
+    output_array[5] = 0.85194275;
+    output_array[6] = 0.79514657;
+    output_array[7] = 0.6815542;
+    output_array[8] = 0.51116565;
+    output_array[9] = 0.28398092;
     output_array[10] = 1.56189504;
     output_array[11] = 1.3631084;
     output_array[12] = 1.10752558;
@@ -82,7 +82,7 @@ TEST_F(WeightNormTest, Norm_Test_Dim0) {
   MakeOpAndSetDevice(Device::CPU, DT_FLOAT);
   // Set up the input tensor.
   AddInputFromArray<float>(TensorShape({3, 5}), {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0});
-  AddInputFromArray<float>(TensorShape({3, 5}), {15.0, 14.0, 13.0, 12.0, 11.0, 10.0, 9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0});
+  AddInputFromArray<float>(TensorShape({5, }), {5.0, 4.0, 3.0, 2.0, 1.0});
   AddInput<int64_t>(TensorShape({}), [](int i) { return 0; });
   AddInput<float>(TensorShape({}), [](float i) { return 1e-6; });
 
@@ -99,16 +99,16 @@ TEST_F(WeightNormTest, Norm_Test_Dim0) {
     // Set up the expected output tensor.
     Tensor expected_output(allocator(), DT_FLOAT, TensorShape({3, 5}));
     float output_array[15];
-    output_array[0] = 1.19333593;
-    output_array[1] = 1.9949174;
-    output_array[2] = 2.50701495;
-    output_array[3] = 2.80418994;
-    output_array[4] = 2.93987366;
-    output_array[5] = 4.77334371;
-    output_array[6] = 4.48856415;
-    output_array[7] = 4.11407582;
-    output_array[8] = 3.6804993;
-    output_array[9] = 3.2071349;
+    output_array[0] = 0.39777864;
+    output_array[1] = 0.5699764;
+    output_array[2] = 0.57854191;
+    output_array[3] = 0.46736499;
+    output_array[4] = 0.26726124;
+    output_array[5] = 2.38667185;
+    output_array[6] = 1.9949174;
+    output_array[7] = 1.54277843;
+    output_array[8] = 1.05157123;
+    output_array[9] = 0.53452248;
     output_array[10] = 4.37556506;
     output_array[11] = 3.4198584;
     output_array[12] = 2.50701495;
@@ -124,7 +124,7 @@ TEST_F(WeightNormTest, Norm_Test_Dim1) {
   MakeOpAndSetDevice(Device::CPU, DT_FLOAT);
   // Set up the input tensor.
   AddInputFromArray<float>(TensorShape({3, 5}), {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0});
-  AddInputFromArray<float>(TensorShape({3, 5}), {15.0, 14.0, 13.0, 12.0, 11.0, 10.0, 9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0});
+  AddInputFromArray<float>(TensorShape({5, }), {5.0, 4.0, 3.0, 2.0, 1.0});
   AddInput<int64_t>(TensorShape({}), [](int i) { return 1; });
   AddInput<float>(TensorShape({}), [](float i) { return 1e-6; });
 
@@ -140,16 +140,16 @@ TEST_F(WeightNormTest, Norm_Test_Dim1) {
     // Set up the expected output tensor.
     Tensor expected_output(allocator(), DT_FLOAT, TensorShape({3, 5}));
     float output_array[15];
-    output_array[0] = 2.02259959;
-    output_array[1] = 3.77551923;
-    output_array[2] = 5.25875893;
-    output_array[3] = 6.47231868;
-    output_array[4] = 7.41619849;
-    output_array[5] = 3.3028913;
-    output_array[6] = 3.46803586;
-    output_array[7] = 3.52308405;
-    output_array[8] = 3.46803586;
-    output_array[9] = 3.3028913;
+    output_array[0] = 0.67419986;
+    output_array[1] = 1.07871978;
+    output_array[2] = 1.21355975;
+    output_array[3] = 1.07871978;
+    output_array[4] = 0.67419986;
+    output_array[5] = 1.65144565;
+    output_array[6] = 1.54134927;
+    output_array[7] = 1.32115652;
+    output_array[8] = 0.99086739;
+    output_array[9] = 0.55048188;
     output_array[10] = 1.88096031;
     output_array[11] = 1.64156536;
     output_array[12] = 1.33377186;
@@ -174,7 +174,7 @@ static Graph* WeightNormGraph(const string& kind, const int64& dim, const Tensor
   input_t.flat<T>().setRandom();
   Node* input = test::graph::Constant(graph, input_t, "input");
 
-  Tensor trainable_input_t(data_type, shape);
+  Tensor trainable_input_t(data_type, TensorShape({shape.dim_size(1), }));
   trainable_input_t.flat<T>().setRandom();
   Node* trainable_input = test::graph::Constant(graph, trainable_input_t, "trainable_input");
   

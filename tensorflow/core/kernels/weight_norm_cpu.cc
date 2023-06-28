@@ -34,12 +34,12 @@ public:
         const Tensor& trainable_weight_tensor = ctx->input(1);
         TensorShape trainable_shape = trainable_weight_tensor.shape();
         int64_t trainable_input_dims = trainable_weight_tensor.dims();
-        OP_REQUIRES(ctx, (trainable_input_dims == 2),
-                    errors::InvalidArgument("Trainable weights is not 2D, currently we only support 2D."));
-        int64_t trainable_row = trainable_weight_tensor.dim_size(0);
-        int64_t trainable_col = trainable_weight_tensor.dim_size(1);
-        OP_REQUIRES(ctx, (trainable_row == row && trainable_col == col),
-                    errors::InvalidArgument("Trainable weights should have same shape with init weights. Pls check use case."));
+        OP_REQUIRES(ctx, (trainable_input_dims == 1),
+                    errors::InvalidArgument("Got trainable weights from a tf.norm along axis=0 without setting keepDim=True, thus trainable weights should be 1D"));
+        //int64_t trainable_row = trainable_weight_tensor.dim_size(0);
+        int64_t trainable_col = trainable_weight_tensor.dim_size(0);
+        OP_REQUIRES(ctx, trainable_col == col,
+                    errors::InvalidArgument("Trainable weights should have same column with init weights. Pls check use case."));
 
         // Get weight_norm dim, for a 2D tensor, norm_dim should be either 0/1/2
         // 0-row / 1-col / 2-tuple(0,1)
@@ -96,7 +96,7 @@ public:
             auto shard_fn2 = [&](int64 start, int64 limit) {
                 for (int64 i = start; i < limit; i++) {
                     for (int j = 0; j < col; j++) {
-                        output(i * col + j) = src_data(i * col + j) * trainable_src_data(i * col + j) * inverse_scale;
+                        output(i * col + j) = src_data(i * col + j) * trainable_src_data(j) * inverse_scale;
                     }
                 }
             };
@@ -124,7 +124,7 @@ public:
             auto shard_fn2 = [&](int64 start, int64 limit) {
                 for (int64 i = start; i < limit; i++) {
                     for (int j = 0; j < col; j++){
-                        output(i * col + j) = src_data(i * col + j) * inverse_scale[j] * trainable_src_data(i * col + j);
+                        output(i * col + j) = src_data(i * col + j) * inverse_scale[j] * trainable_src_data(j);
                     }
                 }
             };
@@ -142,7 +142,7 @@ public:
                     scaling_factors[i] = sqrt(tmp_square_sum) + eps;
                     inverse_scale[i] = 1 / scaling_factors[i];
                     for (int j = 0; j < col; j++){
-                        output(i * col + j) = src_data(i * col + j) * inverse_scale[i] * trainable_src_data(i * col + j);
+                        output(i * col + j) = src_data(i * col + j) * inverse_scale[i] * trainable_src_data(j);
                     }
                 }
             };
@@ -159,15 +159,18 @@ private:
 };
 
 /* l2_norm for non-complex is calculated as
-   math_ops.multiply(x, math_ops.rsqrt(math_ops.maximum(math_ops.reduce_sum(math_ops.square(x), axis, keepdims=True), epsilon)))
+        mul(x, rsqrt(reduce_sum(square(x), axis)))
    the gradient with respect to x should be like below formula
-   rsqrt(reduce_sum(square(x), axis), epsilon) + reduce_sum(x, axis) * (-(reduce_sum(square(x), axis, keepdims=True))^(-3/2) * x)
-   which equals
-   rsqrt(reduce_sum(square(x), axis), epsilon) + reduce_sum(x, axis) * (-(rsqrt(reduce_sum(square(x), axis), epsilon)^3 * x)
+        rsqrt(reduce_sum(square(x), axis)) + reduce_sum(x, axis) * (-(reduce_sum(square(x), axis))^(-3/2) * x)
+   which equals to
+        rsqrt(reduce_sum(square(x), axis)) + reduce_sum(x, axis) * (-(rsqrt(reduce_sum(square(x), axis))^3 * x)
+
    weight_norm for non-complex is calculated as
-   math_ops.multiply(l2_norm(x), y)
+        mul(l2_norm(x), y)
+   where x(init_weight) and l2_norm(x) have shape (row, col) and y(trainable_weight) has shape (col, )
+   the multiplication should reduce l2_norm(x) along axis=0
    the gradient with respect to y should be like below formula
-   x * rsqrt(reduce_sum(square(x), axis=0))
+        reduce_sum(x, axis=0) * rsqrt(reduce_sum(square(x), axis))
 */
 template<class T>
 class WeightNormGradOp : public OpKernel {
@@ -195,12 +198,12 @@ public:
         const Tensor& trainable_weight_tensor = ctx->input(2);
         TensorShape trainable_shape = trainable_weight_tensor.shape();
         int64_t trainable_input_dims = trainable_weight_tensor.dims();
-        OP_REQUIRES(ctx, (trainable_input_dims == 2),
-                    errors::InvalidArgument("Trainable weights is not 2D, currently we only support 2D."));
-        int64_t trainable_row = trainable_weight_tensor.dim_size(0);
-        int64_t trainable_col = trainable_weight_tensor.dim_size(1);
-        OP_REQUIRES(ctx, (trainable_row == row && trainable_col == col),
-                    errors::InvalidArgument("Trainable weights should have same shape with init weights. Pls check use case."));
+        OP_REQUIRES(ctx, (trainable_input_dims == 1),
+                    errors::InvalidArgument("Got trainable weights from a tf.norm along axis=0 without setting keepDim=True, thus trainable weights should be 1D"));
+        //int64_t trainable_row = trainable_weight_tensor.dim_size(0);
+        int64_t trainable_col = trainable_weight_tensor.dim_size(0);
+        OP_REQUIRES(ctx, trainable_col == col,
+                    errors::InvalidArgument("Trainable weights should have same column with init weights. Pls check use case."));
 
         // Get weight_norm dim, for a 2D tensor, norm_dim should be either 0/1/2
         // 0-row / 1-col / 2-tuple(0,1)
@@ -246,14 +249,13 @@ public:
 
         // Case1. norm is calculated over the entire array
         if (axis == input_dims){
-            auto sum_factor = 0.0;
+            std::vector<T> sum_factors(col, 0.0);
             auto scaling_factor = 0.0;
-            auto tmp_sum = 0.0;
             auto tmp_square_sum = 0.0;
             auto shard_fn = [&](int64 start, int64 limit) {
                 for (int64 i = start; i < limit; i++) {
                     for (int j = 0; j < col; j++) {
-                        sum_factor += src_data(i * col + j);
+                        sum_factors[j] += src_data(i * col + j);
                         tmp_square_sum += src_data(i * col + j) * src_data(i * col + j);
                     }
                 }
@@ -264,8 +266,8 @@ public:
             auto shard_fn2 = [&](int64 start, int64 limit) {
                 for (int64 i = start; i < limit; i++) {
                     for (int j = 0; j < col; j++) {
-                        output_init(i * col + j) = (inverse_scale + sum_factor * (- inverse_scale * inverse_scale * inverse_scale * src_data(i * col + j))) * grad_data(i * col + j);
-                        output_trainable(i * col + j) = src_data(i * col + j) * inverse_scale * grad_data(i * col + j);
+                        //output_init(i * col + j) = (inverse_scale + sum_factors[j] * (- inverse_scale * inverse_scale * inverse_scale * src_data(i * col + j))) * trainable_src_data(j) * grad_data(i * col + j);
+                        output_trainable(i * col + j) = sum_factors[j] * inverse_scale * grad_data(i * col + j);
                     }
                 }
             };
@@ -293,35 +295,40 @@ public:
             auto shard_fn2 = [&](int64 start, int64 limit) {
                 for (int64 i = start; i < limit; i++) {
                     for (int j = 0; j < col; j++){
-                        output_init(i * col + j) = (inverse_scale[j] + sum_factors[j] * (- inverse_scale[j] * inverse_scale[j] * inverse_scale[j] * src_data(i * col + j))) * grad_data(i * col + j);
-                        output_trainable(i * col + j) = src_data(i * col + j) * inverse_scale[j] * grad_data(i * col + j);
+                        output_init(i * col + j) = (inverse_scale[j] + sum_factors[j] * (- inverse_scale[j] * inverse_scale[j] * inverse_scale[j] * src_data(i * col + j))) * trainable_src_data(j) * grad_data(i * col + j);
+                        output_trainable(i * col + j) = sum_factors[j] * inverse_scale[j] * grad_data(i * col + j);
                     }
                 }
             };
             Shard(num_threads, ctx->device()->tensorflow_cpu_worker_threads()->workers, row, cost_per_row, shard_fn2);
         } else{
             // Case3. norm is calculated along axis 1 (per col)
-            std::vector<T> sum_factors(row);
+            std::vector<T> sum_factors(col, 0.0);
             std::vector<T> scaling_factors(row);
             std::vector<T> inverse_scale(row);
             auto shard_fn = [&](int64 start, int64 limit) {
                 for (int i = start; i < limit; i++) {
-                    auto tmp_sum = 0.0;
                     auto tmp_square_sum = 0.0;
                     for (int j = 0; j < col; j++){
-                        tmp_sum += src_data(i * col + j);
                         tmp_square_sum += src_data(i * col + j) * src_data(i * col + j);
                     }
-                    sum_factors[i] = tmp_square_sum;
                     scaling_factors[i] = sqrt(tmp_square_sum) + eps;
                     inverse_scale[i] = 1 / scaling_factors[i];
                     for (int j = 0; j < col; j++){
-                        output_init(i * col + j) = (inverse_scale[i] + sum_factors[i] * (- inverse_scale[i] * inverse_scale[i] * inverse_scale[i] * src_data(i * col + j))) * grad_data(i * col + j);
-                        output_trainable(i * col + j) = src_data(i * col + j) * inverse_scale[i] * grad_data(i * col + j);
+                        sum_factors[j] += src_data(i * col + j) * inverse_scale[i];
+                        //output_init(i * col + j) = (inverse_scale[i] + sum_factors[j] * (- inverse_scale[i] * inverse_scale[i] * inverse_scale[i] * src_data(i * col + j))) * trainable_src_data(j) * grad_data(i * col + j);
                     }
                 }
             };
             Shard(num_threads, ctx->device()->tensorflow_cpu_worker_threads()->workers, row, cost_per_row, shard_fn);
+            auto shard_fn2 = [&](int64 start, int64 limit) {
+                for (int i = start; i < limit; i++) {
+                    for (int j = 0; j < col; j++){
+                        output_trainable(i * col + j) = sum_factors[j] * grad_data(i * col + j);
+                    }
+                }
+            };
+            Shard(num_threads, ctx->device()->tensorflow_cpu_worker_threads()->workers, row, cost_per_row, shard_fn2);
         }
 
     }
