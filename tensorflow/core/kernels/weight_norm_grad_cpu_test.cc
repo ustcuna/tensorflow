@@ -43,7 +43,7 @@ TEST_F(WeightNormGradTest, Norm_Test_All_Dim) {
   // Set up the input tensor.
   AddInputFromArray<float>(TensorShape({3, 5}), {11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0});
   AddInputFromArray<float>(TensorShape({3, 5}), {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0});
-  AddInputFromArray<float>(TensorShape({5, }), {5.0, 4.0, 3.0, 2.0, 1.0});
+  AddInputFromArray<float>(TensorShape({}), {5.0});
   AddInput<int64_t>(TensorShape({}), [](int i) { return 2; });
   AddInput<float>(TensorShape({}), [](float i) { return 1e-6; });
   
@@ -56,41 +56,41 @@ TEST_F(WeightNormGradTest, Norm_Test_All_Dim) {
     Tensor expected_trainable_output(allocator(), DT_FLOAT, TensorShape({3, 5}));
     float output_array[15];
     // correct output value for init weight
-    output_array[0] = 1.47876192;
-    output_array[1] = 1.18172704;
-    output_array[2] = 0.81278087;
-    output_array[3] = 0.37192339;
-    output_array[4] = -0.14084537;
-    output_array[5] = 1.5463219;
-    output_array[6] = 1.03172099;
-    output_array[7] = 0.44520879;
-    output_array[8] = -0.2132147;
-    output_array[9] = -0.9435495;
-    output_array[10] = 1.23600404;
-    output_array[11] = 0.50383711;
-    output_array[12] = -0.30024111;
-    output_array[13] = -1.17623064;
-    output_array[14] = -2.12413146;
+    output_array[0] = 1.41074391;
+    output_array[1] = 1.37410121;
+    output_array[2] = 1.30997649;
+    output_array[3] = 1.21836974;
+    output_array[4] = 1.09928097;
+    output_array[5] = 0.95271017;
+    output_array[6] = 0.77865735;
+    output_array[7] = 0.57712251;
+    output_array[8] = 0.34810564;
+    output_array[9] = 0.09160675;
+    output_array[10] = -0.19237417;
+    output_array[11] = -0.50383711;
+    output_array[12] = -0.84278208;
+    output_array[13] = -1.20920907;
+    output_array[14] = -1.60311808;
     test::FillValues<float>(&expected_init_output, output_array);
     // correct output value for trainable weight
-    output_array[0] = 5.62282216;
-    output_array[1] = 7.15631911;
-    output_array[2] = 8.86020461;
-    output_array[3] = 10.73447867;
-    output_array[4] = 12.77914127;
-    output_array[5] = 8.17865041;
-    output_array[6] = 10.13811874;
-    output_array[7] = 12.26797562;
-    output_array[8] = 14.56822105;
-    output_array[9] = 17.03885503;
-    output_array[10] = 10.73447867;
-    output_array[11] = 13.11991837;
-    output_array[12] = 15.67574663;
-    output_array[13] = 18.40196343;
-    output_array[14] = 21.29856878;
+    output_array[0] = 0.31237901;
+    output_array[1] = 0.6815542;
+    output_array[2] = 1.10752558;
+    output_array[3] = 1.59029314;
+    output_array[4] = 2.12985688;
+    output_array[5] = 2.7262168;
+    output_array[6] = 3.37937291;
+    output_array[7] = 4.08932521;
+    output_array[8] = 4.85607368;
+    output_array[9] = 5.67961834;
+    output_array[10] = 6.55995919;
+    output_array[11] = 7.49709621;
+    output_array[12] = 8.49102942;
+    output_array[13] = 9.54175882;
+    output_array[14] = 10.64928439;
     test::FillValues<float>(&expected_trainable_output, output_array);
     // Verify the output tensor.
-    //test::ExpectTensorNear<float>(expected_init_output, *GetOutput(0), 1e-4);
+    test::ExpectTensorNear<float>(expected_init_output, *GetOutput(0), 1e-4);
     test::ExpectTensorNear<float>(expected_trainable_output, *GetOutput(1), 1e-4);
   }
 }
@@ -157,7 +157,7 @@ TEST_F(WeightNormGradTest, Norm_Test_Dim1) {
   // Set up the input tensor.
   AddInputFromArray<float>(TensorShape({3, 5}), {11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0});
   AddInputFromArray<float>(TensorShape({3, 5}), {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0});
-  AddInputFromArray<float>(TensorShape({5, }), {5.0, 4.0, 3.0, 2.0, 1.0});
+  AddInputFromArray<float>(TensorShape({3, }), {3.0, 2.0, 1.0});
   AddInput<int64_t>(TensorShape({}), [](int i) { return 1; });
   AddInput<float>(TensorShape({}), [](float i) { return 1e-6; });
   
@@ -170,41 +170,41 @@ TEST_F(WeightNormGradTest, Norm_Test_Dim1) {
     Tensor expected_trainable_output(allocator(), DT_FLOAT, TensorShape({3, 5}));
     float output_array[15];
     // correct output value for init weight
-    output_array[0] = 6.47231868;
-    output_array[1] = 4.41294455;
-    output_array[2] = 1.91227597;
-    output_array[3] = -1.02968706;
-    output_array[4] = -4.41294455;
-    output_array[5] = 2.64231304;
-    output_array[6] = 1.55969867;
-    output_array[7] = 0.33028913;
-    output_array[8] = -1.04591558;
-    output_array[9] = -2.56891545;
-    output_array[10] = 1.8815603;
-    output_array[11] = 1.05597772;
-    output_array[12] = 0.14719689;
-    output_array[13] = -0.84478218;
-    output_array[14] = -1.91995949;
+    output_array[0] = 3.23615934;
+    output_array[1] = 2.20647228;
+    output_array[2] = 0.95613799;
+    output_array[3] = -0.51484353;
+    output_array[4] = -2.20647228;
+    output_array[5] = 0.48042055;
+    output_array[6] = 0.28358158;
+    output_array[7] = 0.06005257;
+    output_array[8] = -0.19016647;
+    output_array[9] = -0.46707554;
+    output_array[10] = 0.11759752;
+    output_array[11] = 0.06599861;
+    output_array[12] = 0.00919981;
+    output_array[13] = -0.05279889;
+    output_array[14] = -0.11999747;
     test::FillValues<float>(&expected_init_output, output_array);
     // correct output value for trainable weight
-    output_array[0] = 9.25453281;
-    output_array[1] = 12.78490324;
-    output_array[2] = 16.76344856;
-    output_array[3] = 21.19016875;
-    output_array[4] = 26.06506382;
-    output_array[5] = 13.46113863;
-    output_array[6] = 18.11194626;
-    output_array[7] = 23.21092877;
-    output_array[8] = 28.75808616;
-    output_array[9] = 34.75341842;
-    output_array[10] = 17.66774445;
-    output_array[11] = 23.43898928;
-    output_array[12] = 29.65840898;
-    output_array[13] = 36.32600357;
-    output_array[14] = 43.44177303;
+    output_array[0] = 1.4832397;
+    output_array[1] = 3.23615934;
+    output_array[2] = 5.25875893;
+    output_array[3] = 7.55103846;
+    output_array[4] = 10.11299794;
+    output_array[5] = 5.28462607;
+    output_array[6] = 6.5507344;
+    output_array[7] = 7.92693911;
+    output_array[8] = 9.41324019;
+    output_array[9] = 11.00963765;
+    output_array[10] = 7.90003331;
+    output_array[11] = 9.0286095;
+    output_array[12] = 10.22558424;
+    output_array[13] = 11.49095754;
+    output_array[14] = 12.8247294;
     test::FillValues<float>(&expected_trainable_output, output_array);
     // Verify the output tensor.
-    //test::ExpectTensorNear<float>(expected_init_output, *GetOutput(0), 1e-4);
+    test::ExpectTensorNear<float>(expected_init_output, *GetOutput(0), 1e-4);
     test::ExpectTensorNear<float>(expected_trainable_output, *GetOutput(1), 1e-4);
   }
 }

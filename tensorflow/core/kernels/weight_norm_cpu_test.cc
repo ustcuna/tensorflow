@@ -41,7 +41,7 @@ TEST_F(WeightNormTest, Norm_Test_All_Dim) {
   MakeOpAndSetDevice(Device::CPU, DT_FLOAT);
   // Set up the input tensor.
   AddInputFromArray<float>(TensorShape({3, 5}), {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0});
-  AddInputFromArray<float>(TensorShape({5, }), {5.0, 4.0, 3.0, 2.0, 1.0});
+  AddInputFromArray<float>(TensorShape({}), {5.0});
   AddInput<int64_t>(TensorShape({}), [](int i) { return 2; });
   AddInput<float>(TensorShape({}), [](float i) { return 1e-6; });
 
@@ -58,20 +58,20 @@ TEST_F(WeightNormTest, Norm_Test_All_Dim) {
     Tensor expected_output(allocator(), DT_FLOAT, TensorShape({3, 5}));
     float output_array[15];
     output_array[0] = 0.14199046;
-    output_array[1] = 0.22718473;
-    output_array[2] = 0.25558283;
-    output_array[3] = 0.22718473;
-    output_array[4] = 0.14199046;
+    output_array[1] = 0.28398092;
+    output_array[2] = 0.42597138;
+    output_array[3] = 0.56796183;
+    output_array[4] = 0.70995229;
     output_array[5] = 0.85194275;
-    output_array[6] = 0.79514657;
-    output_array[7] = 0.6815542;
-    output_array[8] = 0.51116565;
-    output_array[9] = 0.28398092;
+    output_array[6] = 0.99393321;
+    output_array[7] = 1.13592367;
+    output_array[8] = 1.27791413;
+    output_array[9] = 1.41990459;
     output_array[10] = 1.56189504;
-    output_array[11] = 1.3631084;
-    output_array[12] = 1.10752558;
-    output_array[13] = 0.79514657;
-    output_array[14] = 0.42597138;
+    output_array[11] = 1.7038855;
+    output_array[12] = 1.84587596;
+    output_array[13] = 1.98786642;
+    output_array[14] = 2.12985688;
     test::FillValues<float>(&expected_output, output_array);
     // Verify the output tensor.
     test::ExpectTensorNear<float>(expected_output, *GetOutput(0), 1e-4);
@@ -88,8 +88,8 @@ TEST_F(WeightNormTest, Norm_Test_Dim0) {
 
   // L2 norm should be
   // [[0.07955573 0.1424941  0.1928473  0.2336825  0.26726124]
- //   [0.47733437 0.49872935 0.51425948 0.52578561 0.53452248]
- //   [0.87511301 0.8549646  0.83567165 0.81788873 0.80178373]]
+  //  [0.47733437 0.49872935 0.51425948 0.52578561 0.53452248]
+  //  [0.87511301 0.8549646  0.83567165 0.81788873 0.80178373]]
   
   TF_ASSERT_OK(RunOpKernel());
   TF_EXPECT_OK(device_->Sync());
@@ -124,14 +124,14 @@ TEST_F(WeightNormTest, Norm_Test_Dim1) {
   MakeOpAndSetDevice(Device::CPU, DT_FLOAT);
   // Set up the input tensor.
   AddInputFromArray<float>(TensorShape({3, 5}), {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0});
-  AddInputFromArray<float>(TensorShape({5, }), {5.0, 4.0, 3.0, 2.0, 1.0});
+  AddInputFromArray<float>(TensorShape({3, }), {3.0, 2.0, 1.0});
   AddInput<int64_t>(TensorShape({}), [](int i) { return 1; });
   AddInput<float>(TensorShape({}), [](float i) { return 1e-6; });
 
   // L2 norm should be
   // [[0.13483997 0.26967994 0.40451992 0.53935989 0.67419986]
- //   [0.33028913 0.38533732 0.44038551 0.49543369 0.55048188]
- //   [0.37619206 0.41039134 0.44459062 0.4787899  0.51298918]]
+  //  [0.33028913 0.38533732 0.44038551 0.49543369 0.55048188]
+  //  [0.37619206 0.41039134 0.44459062 0.4787899  0.51298918]]
   
   TF_ASSERT_OK(RunOpKernel());
   TF_EXPECT_OK(device_->Sync());
@@ -140,20 +140,20 @@ TEST_F(WeightNormTest, Norm_Test_Dim1) {
     // Set up the expected output tensor.
     Tensor expected_output(allocator(), DT_FLOAT, TensorShape({3, 5}));
     float output_array[15];
-    output_array[0] = 0.67419986;
-    output_array[1] = 1.07871978;
+    output_array[0] = 0.40451992;
+    output_array[1] = 0.80903983;
     output_array[2] = 1.21355975;
-    output_array[3] = 1.07871978;
-    output_array[4] = 0.67419986;
-    output_array[5] = 1.65144565;
-    output_array[6] = 1.54134927;
-    output_array[7] = 1.32115652;
+    output_array[3] = 1.61807967;
+    output_array[4] = 2.02259959;
+    output_array[5] = 0.66057826;
+    output_array[6] = 0.77067464;
+    output_array[7] = 0.88077101;
     output_array[8] = 0.99086739;
-    output_array[9] = 0.55048188;
-    output_array[10] = 1.88096031;
-    output_array[11] = 1.64156536;
-    output_array[12] = 1.33377186;
-    output_array[13] = 0.9575798;
+    output_array[9] = 1.10096377;
+    output_array[10] = 0.37619206;
+    output_array[11] = 0.41039134;
+    output_array[12] = 0.44459062;
+    output_array[13] = 0.4787899;
     output_array[14] = 0.51298918;
     test::FillValues<float>(&expected_output, output_array);
     // Verify the output tensor.
@@ -174,13 +174,19 @@ static Graph* WeightNormGraph(const string& kind, const int64& dim, const Tensor
   input_t.flat<T>().setRandom();
   Node* input = test::graph::Constant(graph, input_t, "input");
 
-  Tensor trainable_input_t(data_type, TensorShape({shape.dim_size(1), }));
+  Tensor norm_axis(DT_INT64, TensorShape({}));
+  norm_axis.scalar<int64>()() = dim;
+  Node* axis = test::graph::Constant(graph, norm_axis);
+
+  TensorShape trainable_shape = {};
+  if(dim == 0){
+    trainable_shape = TensorShape({shape.dim_size(1), });
+  } else if(dim == 1){
+    trainable_shape = TensorShape({shape.dim_size(0), });
+  }
+  Tensor trainable_input_t(data_type, TensorShape({trainable_shape}));
   trainable_input_t.flat<T>().setRandom();
   Node* trainable_input = test::graph::Constant(graph, trainable_input_t, "trainable_input");
-  
-  Tensor l2norm_axis(DT_INT64, TensorShape({}));
-  l2norm_axis.scalar<int64>()() = dim;
-  Node* axis = test::graph::Constant(graph, l2norm_axis);
 
   Tensor l2norm_epsilon(data_type, TensorShape({}));
   l2norm_epsilon.scalar<T>()() = 1e-6;
@@ -197,6 +203,8 @@ static Graph* WeightNormGraph(const string& kind, const int64& dim, const Tensor
   Node* max;
   Node* rsqrt;
   Node* mul_0;
+  Node* repeat;
+  Node* reshape;
   Node* mul_1;
 
   Node* weightnorm;
@@ -246,11 +254,55 @@ static Graph* WeightNormGraph(const string& kind, const int64& dim, const Tensor
                     .Attr("T", data_type)
                     .Finalize(graph, &mul_0));
 
-    TF_CHECK_OK(NodeBuilder(graph->NewName("mul_1"), "Mul")
+    if (dim == 2){
+      Tensor repeats(DT_INT64, TensorShape({}));
+      repeats.scalar<int64>()() = shape.dim_size(0) * shape.dim_size(1);
+      Node* repeat_num = test::graph::Constant(graph, repeats);
+      TF_CHECK_OK(NodeBuilder(graph->NewName("repeat"), "Repeat")
+                    .Input(trainable_input)
+                    .Input(repeat_num)
+                    .Attr("T", data_type)
+                    .Finalize(graph, &repeat));
+      Tensor reshape_to_shape(DT_INT64, TensorShape({shape}));
+      Node* reshape_to = test::graph::Constant(graph, reshape_to_shape);
+      TF_CHECK_OK(NodeBuilder(graph->NewName("reshape"), "Reshape")
+                    .Input(repeat)
+                    .Input(reshape_to)
+                    .Attr("T", data_type)
+                    .Finalize(graph, &reshape));
+      TF_CHECK_OK(NodeBuilder(graph->NewName("mul_1"), "Mul")
+                    .Input(mul_0)
+                    .Input(reshape)
+                    .Attr("T", data_type)
+                    .Finalize(graph, &mul_1));
+    } else if (dim == 1){
+      Tensor repeats(DT_INT64, TensorShape({}));
+      repeats.scalar<int64>()() = shape.dim_size(1);
+      Node* repeat_num = test::graph::Constant(graph, repeats);
+      TF_CHECK_OK(NodeBuilder(graph->NewName("repeat"), "Repeat")
+                    .Input(trainable_input)
+                    .Input(repeat_num)
+                    .Attr("T", data_type)
+                    .Finalize(graph, &repeat));
+      Tensor reshape_to_shape(DT_INT64, TensorShape({shape}));
+      Node* reshape_to = test::graph::Constant(graph, reshape_to_shape);
+      TF_CHECK_OK(NodeBuilder(graph->NewName("reshape"), "Reshape")
+                    .Input(repeat)
+                    .Input(reshape_to)
+                    .Attr("T", data_type)
+                    .Finalize(graph, &reshape));
+      TF_CHECK_OK(NodeBuilder(graph->NewName("mul_1"), "Mul")
+                    .Input(mul_0)
+                    .Input(reshape)
+                    .Attr("T", data_type)
+                    .Finalize(graph, &mul_1));
+    } else{
+      TF_CHECK_OK(NodeBuilder(graph->NewName("mul_1"), "Mul")
                     .Input(mul_0)
                     .Input(trainable_input)
                     .Attr("T", data_type)
                     .Finalize(graph, &mul_1));
+    }
 
     return graph;
   } else {

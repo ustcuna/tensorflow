@@ -10,6 +10,10 @@
 
 namespace tensorflow {
 
+/*
+    This is a fusion kernel WeightNorm which implemented the below function
+        tf.multiply(tf.nn.l2_normalize(init_weights, axis=norm_axis, epsilon=l2norm_epsilon), tf.norm(trainable_weights, axis=norm_axis))
+*/
 template<class T>
 class WeightNormOp : public OpKernel {
 public:
@@ -31,16 +35,6 @@ public:
         int64_t row = init_weight_tensor.dim_size(0);
         int64_t col = init_weight_tensor.dim_size(1);
 
-        const Tensor& trainable_weight_tensor = ctx->input(1);
-        TensorShape trainable_shape = trainable_weight_tensor.shape();
-        int64_t trainable_input_dims = trainable_weight_tensor.dims();
-        OP_REQUIRES(ctx, (trainable_input_dims == 1),
-                    errors::InvalidArgument("Got trainable weights from a tf.norm along axis=0 without setting keepDim=True, thus trainable weights should be 1D"));
-        //int64_t trainable_row = trainable_weight_tensor.dim_size(0);
-        int64_t trainable_col = trainable_weight_tensor.dim_size(0);
-        OP_REQUIRES(ctx, trainable_col == col,
-                    errors::InvalidArgument("Trainable weights should have same column with init weights. Pls check use case."));
-
         // Get weight_norm dim, for a 2D tensor, norm_dim should be either 0/1/2
         // 0-row / 1-col / 2-tuple(0,1)
         const Tensor& norm_dim_tensor = ctx->input(2);
@@ -53,12 +47,25 @@ public:
                     "Norm dim tensor should be a scalar integer, but got shape ",
                     norm_dim_tensor.shape().DebugString()));
         int64_t norm_dim = internal::SubtleMustCopy(norm_dim_tensor.scalar<int64_t>()());
-        //int64_t axis = norm_dim < 0 ? input_dims : norm_dim;
         int64_t axis = norm_dim;
         OP_REQUIRES(ctx, (0 <= axis && axis <= input_dims),
                     errors::InvalidArgument(
                         "WeightNormOp : Expected norm dimensions in the range "
                         "[0, ", input_dims, "], but got ", axis));
+
+        const Tensor& trainable_weight_tensor = ctx->input(1);
+        TensorShape trainable_shape = trainable_weight_tensor.shape();
+        int64_t trainable_input_dims = trainable_weight_tensor.dims();
+        if (trainable_input_dims != 0){
+            OP_REQUIRES(ctx, (trainable_input_dims == 1),
+                    errors::InvalidArgument("Got trainable weights from a tf.norm along axis 0 or 1, thus trainable weights should be 1D"));
+            int64_t trainable_dim = trainable_weight_tensor.dim_size(0);
+            OP_REQUIRES(ctx, (norm_dim == 0 && trainable_dim == col) || (norm_dim == 1 && trainable_dim == row),
+                    errors::InvalidArgument("Trainable weights should have same row or column with init weights. Pls check use case."));
+        } else{
+            OP_REQUIRES(ctx, (norm_dim == 2 && trainable_input_dims == 0),
+                    errors::InvalidArgument("Got trainable weights from a tf.norm along axis [0, 1], thus trainable weights should be a scalar integer."));
+        }
 
         // Handle input tensors
         auto src_data = init_weight_tensor.flat<T>();
@@ -96,7 +103,7 @@ public:
             auto shard_fn2 = [&](int64 start, int64 limit) {
                 for (int64 i = start; i < limit; i++) {
                     for (int j = 0; j < col; j++) {
-                        output(i * col + j) = src_data(i * col + j) * trainable_src_data(j) * inverse_scale;
+                        output(i * col + j) = src_data(i * col + j) * trainable_src_data(0) * inverse_scale;
                     }
                 }
             };
@@ -142,7 +149,7 @@ public:
                     scaling_factors[i] = sqrt(tmp_square_sum) + eps;
                     inverse_scale[i] = 1 / scaling_factors[i];
                     for (int j = 0; j < col; j++){
-                        output(i * col + j) = src_data(i * col + j) * inverse_scale[i] * trainable_src_data(j);
+                        output(i * col + j) = src_data(i * col + j) * inverse_scale[i] * trainable_src_data(i);
                     }
                 }
             };
@@ -170,7 +177,9 @@ private:
    where x(init_weight) and l2_norm(x) have shape (row, col) and y(trainable_weight) has shape (col, )
    the multiplication should reduce l2_norm(x) along axis=0
    the gradient with respect to y should be like below formula
-        reduce_sum(x, axis=0) * rsqrt(reduce_sum(square(x), axis))
+        l2_norm w/ axis=0: reduce_sum(x, axis=0) * rsqrt(reduce_sum(square(x), axis=0)) * grad
+        l2_norm w/ axis=1: reduce_sum(x * rsqrt(reduce_sum(square(x), axis=1)) * grad
+        l2_norm w/ axis=[0,1]: reduce_sum(x, axis=0) * rsqrt(reduce_sum(square(x), axis=[0,1])) * grad
 */
 template<class T>
 class WeightNormGradOp : public OpKernel {
@@ -195,16 +204,6 @@ public:
         int64_t row = init_weight_tensor.dim_size(0);
         int64_t col = init_weight_tensor.dim_size(1);
 
-        const Tensor& trainable_weight_tensor = ctx->input(2);
-        TensorShape trainable_shape = trainable_weight_tensor.shape();
-        int64_t trainable_input_dims = trainable_weight_tensor.dims();
-        OP_REQUIRES(ctx, (trainable_input_dims == 1),
-                    errors::InvalidArgument("Got trainable weights from a tf.norm along axis=0 without setting keepDim=True, thus trainable weights should be 1D"));
-        //int64_t trainable_row = trainable_weight_tensor.dim_size(0);
-        int64_t trainable_col = trainable_weight_tensor.dim_size(0);
-        OP_REQUIRES(ctx, trainable_col == col,
-                    errors::InvalidArgument("Trainable weights should have same column with init weights. Pls check use case."));
-
         // Get weight_norm dim, for a 2D tensor, norm_dim should be either 0/1/2
         // 0-row / 1-col / 2-tuple(0,1)
         const Tensor& norm_dim_tensor = ctx->input(3);
@@ -222,6 +221,20 @@ public:
                     errors::InvalidArgument(
                         "WeightNormOp : Expected norm dimensions in the range "
                         "[0, ", input_dims, "], but got ", axis));
+
+        const Tensor& trainable_weight_tensor = ctx->input(2);
+        TensorShape trainable_shape = trainable_weight_tensor.shape();
+        int64_t trainable_input_dims = trainable_weight_tensor.dims();
+        if (trainable_input_dims != 0){
+            OP_REQUIRES(ctx, (trainable_input_dims == 1),
+                    errors::InvalidArgument("Got trainable weights from a tf.norm along axis 0 or 1, thus trainable weights should be 1D"));
+            int64_t trainable_dim = trainable_weight_tensor.dim_size(0);
+            OP_REQUIRES(ctx, (norm_dim == 0 && trainable_dim == col) || (norm_dim == 1 && trainable_dim == row),
+                    errors::InvalidArgument("Trainable weights should have same row or column with init weights. Pls check use case."));
+        } else{
+            OP_REQUIRES(ctx, (norm_dim == 2 && trainable_input_dims == 0),
+                    errors::InvalidArgument("Got trainable weights from a tf.norm along axis [0, 1], thus trainable weights should be a scalar integer."));
+        }
 
         // Handle input tensors
         auto grad_data = grad_tensor.flat<T>();
@@ -249,13 +262,13 @@ public:
 
         // Case1. norm is calculated over the entire array
         if (axis == input_dims){
-            std::vector<T> sum_factors(col, 0.0);
+            auto sum_factor = 0.0;
             auto scaling_factor = 0.0;
             auto tmp_square_sum = 0.0;
             auto shard_fn = [&](int64 start, int64 limit) {
                 for (int64 i = start; i < limit; i++) {
                     for (int j = 0; j < col; j++) {
-                        sum_factors[j] += src_data(i * col + j);
+                        sum_factor += src_data(i * col + j);
                         tmp_square_sum += src_data(i * col + j) * src_data(i * col + j);
                     }
                 }
@@ -266,8 +279,8 @@ public:
             auto shard_fn2 = [&](int64 start, int64 limit) {
                 for (int64 i = start; i < limit; i++) {
                     for (int j = 0; j < col; j++) {
-                        //output_init(i * col + j) = (inverse_scale + sum_factors[j] * (- inverse_scale * inverse_scale * inverse_scale * src_data(i * col + j))) * trainable_src_data(j) * grad_data(i * col + j);
-                        output_trainable(i * col + j) = sum_factors[j] * inverse_scale * grad_data(i * col + j);
+                        output_init(i * col + j) = (inverse_scale + sum_factor * (- inverse_scale * inverse_scale * inverse_scale * src_data(i * col + j))) * trainable_src_data(0) * grad_data(i * col + j);
+                        output_trainable(i * col + j) = src_data(i * col + j) * inverse_scale * grad_data(i * col + j);
                     }
                 }
             };
@@ -303,32 +316,27 @@ public:
             Shard(num_threads, ctx->device()->tensorflow_cpu_worker_threads()->workers, row, cost_per_row, shard_fn2);
         } else{
             // Case3. norm is calculated along axis 1 (per col)
-            std::vector<T> sum_factors(col, 0.0);
-            std::vector<T> scaling_factors(row);
-            std::vector<T> inverse_scale(row);
+            std::vector<T> sum_factors(row, 0.0);
+            std::vector<T> scaling_factors(row, 0.0);
+            std::vector<T> inverse_scale(row, 0.0);
             auto shard_fn = [&](int64 start, int64 limit) {
                 for (int i = start; i < limit; i++) {
+                    auto tmp_sum = 0.0;
                     auto tmp_square_sum = 0.0;
                     for (int j = 0; j < col; j++){
+                        tmp_sum += src_data(i * col + j);
                         tmp_square_sum += src_data(i * col + j) * src_data(i * col + j);
                     }
+                    sum_factors[i] = tmp_sum;
                     scaling_factors[i] = sqrt(tmp_square_sum) + eps;
                     inverse_scale[i] = 1 / scaling_factors[i];
                     for (int j = 0; j < col; j++){
-                        sum_factors[j] += src_data(i * col + j) * inverse_scale[i];
-                        //output_init(i * col + j) = (inverse_scale[i] + sum_factors[j] * (- inverse_scale[i] * inverse_scale[i] * inverse_scale[i] * src_data(i * col + j))) * trainable_src_data(j) * grad_data(i * col + j);
+                        output_init(i * col + j) = (inverse_scale[i] + sum_factors[i] * (- inverse_scale[i] * inverse_scale[i] * inverse_scale[i] * src_data(i * col + j))) * trainable_src_data(i) * grad_data(i * col + j);
+                        output_trainable(i * col + j) = src_data(i * col + j) * inverse_scale[i] * grad_data(i * col + j);
                     }
                 }
             };
             Shard(num_threads, ctx->device()->tensorflow_cpu_worker_threads()->workers, row, cost_per_row, shard_fn);
-            auto shard_fn2 = [&](int64 start, int64 limit) {
-                for (int i = start; i < limit; i++) {
-                    for (int j = 0; j < col; j++){
-                        output_trainable(i * col + j) = sum_factors[j] * grad_data(i * col + j);
-                    }
-                }
-            };
-            Shard(num_threads, ctx->device()->tensorflow_cpu_worker_threads()->workers, row, cost_per_row, shard_fn2);
         }
 
     }
@@ -344,7 +352,7 @@ private:
 REGISTER_OP("WeightNorm")
     .Input("init_weights: T")
     .Input("trainable_weights: T")
-    .Input("l2norm_axis: int64")
+    .Input("norm_axis: int64")
     .Input("l2norm_epsilon: T")
     .Output("output: T")
     .Attr("T: {float, double}")
@@ -354,7 +362,7 @@ REGISTER_OP("WeightNormGrad")
     .Input("grad: T")
     .Input("init_weights: T")
     .Input("trainable_weights: T")
-    .Input("l2norm_axis: int64")
+    .Input("norm_axis: int64")
     .Input("l2norm_epsilon: T")
     .Output("output_init: T")
     .Output("output_trainable: T")
