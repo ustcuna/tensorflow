@@ -56,16 +56,17 @@ public:
         const Tensor& trainable_weight_tensor = ctx->input(1);
         TensorShape trainable_shape = trainable_weight_tensor.shape();
         int64_t trainable_input_dims = trainable_weight_tensor.dims();
-        if (trainable_input_dims != 0){
-            OP_REQUIRES(ctx, (trainable_input_dims == 1),
+        OP_REQUIRES(ctx, (trainable_input_dims == 1),
                     errors::InvalidArgument("Got trainable weights from a tf.norm along axis 0 or 1, thus trainable weights should be 1D"));
-            int64_t trainable_dim = trainable_weight_tensor.dim_size(0);
+        int64_t trainable_dim = trainable_weight_tensor.dim_size(0);
+        if (norm_dim == 2){
+            OP_REQUIRES(ctx, (trainable_dim == 1),
+                    errors::InvalidArgument("Got trainable weights from a tf.norm along axis [0, 1], thus trainable weights should be with shape (1, )."));
+        } else{
             OP_REQUIRES(ctx, (norm_dim == 0 && trainable_dim == col) || (norm_dim == 1 && trainable_dim == row),
                     errors::InvalidArgument("Trainable weights should have same row or column with init weights. Pls check use case."));
-        } else{
-            OP_REQUIRES(ctx, (norm_dim == 2 && trainable_input_dims == 0),
-                    errors::InvalidArgument("Got trainable weights from a tf.norm along axis [0, 1], thus trainable weights should be a scalar integer."));
         }
+
 
         // Handle input tensors
         auto src_data = init_weight_tensor.flat<T>();
@@ -110,9 +111,8 @@ public:
             Shard(num_threads, ctx->device()->tensorflow_cpu_worker_threads()->workers, row, cost_per_row, shard_fn2);
         } else if (axis == 0){
             // Case2. norm is calculated along axis 0 (per row)
-            std::vector<T> scaling_factors(col, 0.0);
-            std::vector<T> inverse_scale(col, 0.0);
-
+            std::vector<T> scaling_factors(col);
+            std::vector<T> inverse_scale(col);
             // row be the outer loop to make src_data continuous
             auto shard_fn = [&](int64 start, int64 limit) {
                 for (int j = 0; j < row; j++){
@@ -173,13 +173,11 @@ private:
         rsqrt(reduce_sum(square(x), axis)) + reduce_sum(x, axis) * (-(rsqrt(reduce_sum(square(x), axis))^3 * x)
 
    weight_norm for non-complex is calculated as
-        mul(l2_norm(x), y)
-   where x(init_weight) and l2_norm(x) have shape (row, col) and y(trainable_weight) has shape (col, )
-   the multiplication should reduce l2_norm(x) along axis=0
+        mul(l2_norm(x, axis=norm_axis), y)
+   thus the gradient with respect to x should be like below formula
+        y * rsqrt(reduce_sum(square(x), axis)) + reduce_sum(x, axis) * (-(rsqrt(reduce_sum(square(x), axis))^3 * x)
    the gradient with respect to y should be like below formula
-        l2_norm w/ axis=0: reduce_sum(x, axis=0) * rsqrt(reduce_sum(square(x), axis=0)) * grad
-        l2_norm w/ axis=1: reduce_sum(x * rsqrt(reduce_sum(square(x), axis=1)) * grad
-        l2_norm w/ axis=[0,1]: reduce_sum(x, axis=0) * rsqrt(reduce_sum(square(x), axis=[0,1])) * grad
+        x * rsqrt(reduce_sum(square(x), axis))
 */
 template<class T>
 class WeightNormGradOp : public OpKernel {
@@ -225,15 +223,15 @@ public:
         const Tensor& trainable_weight_tensor = ctx->input(2);
         TensorShape trainable_shape = trainable_weight_tensor.shape();
         int64_t trainable_input_dims = trainable_weight_tensor.dims();
-        if (trainable_input_dims != 0){
-            OP_REQUIRES(ctx, (trainable_input_dims == 1),
+        OP_REQUIRES(ctx, (trainable_input_dims == 1),
                     errors::InvalidArgument("Got trainable weights from a tf.norm along axis 0 or 1, thus trainable weights should be 1D"));
-            int64_t trainable_dim = trainable_weight_tensor.dim_size(0);
+        int64_t trainable_dim = trainable_weight_tensor.dim_size(0);
+        if (norm_dim == 2){
+            OP_REQUIRES(ctx, (trainable_dim == 1),
+                    errors::InvalidArgument("Got trainable weights from a tf.norm along axis [0, 1], thus trainable weights should be with shape (1, )."));
+        } else{
             OP_REQUIRES(ctx, (norm_dim == 0 && trainable_dim == col) || (norm_dim == 1 && trainable_dim == row),
                     errors::InvalidArgument("Trainable weights should have same row or column with init weights. Pls check use case."));
-        } else{
-            OP_REQUIRES(ctx, (norm_dim == 2 && trainable_input_dims == 0),
-                    errors::InvalidArgument("Got trainable weights from a tf.norm along axis [0, 1], thus trainable weights should be a scalar integer."));
         }
 
         // Handle input tensors

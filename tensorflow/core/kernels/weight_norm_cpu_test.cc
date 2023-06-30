@@ -41,7 +41,7 @@ TEST_F(WeightNormTest, Norm_Test_All_Dim) {
   MakeOpAndSetDevice(Device::CPU, DT_FLOAT);
   // Set up the input tensor.
   AddInputFromArray<float>(TensorShape({3, 5}), {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0});
-  AddInputFromArray<float>(TensorShape({}), {5.0});
+  AddInputFromArray<float>(TensorShape({1, }), {5.0});
   AddInput<int64_t>(TensorShape({}), [](int i) { return 2; });
   AddInput<float>(TensorShape({}), [](float i) { return 1e-6; });
 
@@ -178,7 +178,7 @@ static Graph* WeightNormGraph(const string& kind, const int64& dim, const Tensor
   norm_axis.scalar<int64>()() = dim;
   Node* axis = test::graph::Constant(graph, norm_axis);
 
-  TensorShape trainable_shape = {};
+  TensorShape trainable_shape = {1, };
   if(dim == 0){
     trainable_shape = TensorShape({shape.dim_size(1), });
   } else if(dim == 1){
@@ -255,36 +255,49 @@ static Graph* WeightNormGraph(const string& kind, const int64& dim, const Tensor
                     .Finalize(graph, &mul_0));
 
     if (dim == 2){
-      Tensor repeats(DT_INT64, TensorShape({}));
-      repeats.scalar<int64>()() = shape.dim_size(0) * shape.dim_size(1);
+      std::vector<int> multiples = {shape.dim_size(0) * shape.dim_size(1)};
+      Tensor repeats(DT_INT64, TensorShape({1}));
+      auto tensor_data = repeats.flat<int64>().data();
+      std::copy(multiples.begin(), multiples.end(), tensor_data);
       Node* repeat_num = test::graph::Constant(graph, repeats);
-      TF_CHECK_OK(NodeBuilder(graph->NewName("repeat"), "Repeat")
+      TF_CHECK_OK(NodeBuilder(graph->NewName("repeat"), "Tile")
                     .Input(trainable_input)
                     .Input(repeat_num)
                     .Attr("T", data_type)
                     .Finalize(graph, &repeat));
-      Tensor reshape_to_shape(DT_INT64, TensorShape({shape}));
+
+      Tensor reshape_to_shape(DT_INT64, TensorShape({2}));
+      std::vector<int> init_shape = {shape.dim_size(0), shape.dim_size(1)};
+      auto shape_data = reshape_to_shape.flat<int64>().data();
+      std::copy(init_shape.begin(), init_shape.end(), shape_data);
       Node* reshape_to = test::graph::Constant(graph, reshape_to_shape);
       TF_CHECK_OK(NodeBuilder(graph->NewName("reshape"), "Reshape")
                     .Input(repeat)
                     .Input(reshape_to)
                     .Attr("T", data_type)
                     .Finalize(graph, &reshape));
+
       TF_CHECK_OK(NodeBuilder(graph->NewName("mul_1"), "Mul")
                     .Input(mul_0)
                     .Input(reshape)
                     .Attr("T", data_type)
                     .Finalize(graph, &mul_1));
     } else if (dim == 1){
-      Tensor repeats(DT_INT64, TensorShape({}));
-      repeats.scalar<int64>()() = shape.dim_size(1);
+      std::vector<int> multiples = {shape.dim_size(1)};
+      Tensor repeats(DT_INT64, TensorShape({1}));
+      auto tensor_data = repeats.flat<int64>().data();
+      std::copy(multiples.begin(), multiples.end(), tensor_data);
       Node* repeat_num = test::graph::Constant(graph, repeats);
-      TF_CHECK_OK(NodeBuilder(graph->NewName("repeat"), "Repeat")
+      TF_CHECK_OK(NodeBuilder(graph->NewName("repeat"), "Tile")
                     .Input(trainable_input)
                     .Input(repeat_num)
                     .Attr("T", data_type)
                     .Finalize(graph, &repeat));
-      Tensor reshape_to_shape(DT_INT64, TensorShape({shape}));
+
+      Tensor reshape_to_shape(DT_INT64, TensorShape({2}));
+      std::vector<int> init_shape = {shape.dim_size(0), shape.dim_size(1)};
+      auto shape_data = reshape_to_shape.flat<int64>().data();
+      std::copy(init_shape.begin(), init_shape.end(), shape_data);
       Node* reshape_to = test::graph::Constant(graph, reshape_to_shape);
       TF_CHECK_OK(NodeBuilder(graph->NewName("reshape"), "Reshape")
                     .Input(repeat)
@@ -339,6 +352,7 @@ static Graph* WeightNormGraph(const string& kind, const int64& dim, const Tensor
   BM_WEIGHTNORM(Fused, A, B, type, 2, T);
 
 #define BENCHMARK_DTYPE(T)                     \
+  BENCHMARK_WEIGHTNORM(256, 128, cpu, T);      \
   BENCHMARK_WEIGHTNORM(512, 256, cpu, T);      \
   BENCHMARK_WEIGHTNORM(1024, 512, cpu, T);     \
   BENCHMARK_WEIGHTNORM(1024, 2048, cpu, T);    \
