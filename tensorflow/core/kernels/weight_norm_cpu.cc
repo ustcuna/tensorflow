@@ -97,18 +97,15 @@ public:
                         tmp_sum += src_data(i * col + j) * src_data(i * col + j);
                     }
                 }
-            };
-            Shard(num_threads, ctx->device()->tensorflow_cpu_worker_threads()->workers, row, cost_per_row, shard_fn);
-            scaling_factor = sqrt(tmp_sum) + eps;
-            auto inverse_scale = 1 / scaling_factor;
-            auto shard_fn2 = [&](int64 start, int64 limit) {
+                scaling_factor = sqrt(tmp_sum) + eps;
+                auto inverse_scale = 1 / scaling_factor;
                 for (int64 i = start; i < limit; i++) {
                     for (int j = 0; j < col; j++) {
                         output(i * col + j) = src_data(i * col + j) * trainable_src_data(0) * inverse_scale;
                     }
                 }
             };
-            Shard(num_threads, ctx->device()->tensorflow_cpu_worker_threads()->workers, row, cost_per_row, shard_fn2);
+            Shard(num_threads, ctx->device()->tensorflow_cpu_worker_threads()->workers, row, cost_per_row, shard_fn);
         } else if (axis == 0){
             // Case2. norm is calculated along axis 0 (per row)
             std::vector<T> scaling_factors(col);
@@ -270,11 +267,8 @@ public:
                         tmp_square_sum += src_data(i * col + j) * src_data(i * col + j);
                     }
                 }
-            };
-            Shard(num_threads, ctx->device()->tensorflow_cpu_worker_threads()->workers, row, cost_per_row, shard_fn);
-            scaling_factor = sqrt(tmp_square_sum) + eps;
-            auto inverse_scale = 1 / scaling_factor;
-            auto shard_fn2 = [&](int64 start, int64 limit) {
+                scaling_factor = sqrt(tmp_square_sum) + eps;
+                auto inverse_scale = 1 / scaling_factor;
                 for (int64 i = start; i < limit; i++) {
                     for (int j = 0; j < col; j++) {
                         output_init(i * col + j) = (inverse_scale + sum_factor * (- inverse_scale * inverse_scale * inverse_scale * src_data(i * col + j))) * trainable_src_data(0) * grad_data(i * col + j);
@@ -282,7 +276,7 @@ public:
                     }
                 }
             };
-            Shard(num_threads, ctx->device()->tensorflow_cpu_worker_threads()->workers, row, cost_per_row, shard_fn2);
+            Shard(num_threads, ctx->device()->tensorflow_cpu_worker_threads()->workers, row, cost_per_row, shard_fn);
         } else if (axis == 0){
             // Case2. norm is calculated along axis 0 (per row)
             std::vector<T> sum_factors(col, 0.0);
